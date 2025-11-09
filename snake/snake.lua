@@ -61,8 +61,6 @@ end
 
 -- lilka.init() is called once at the start
 function lilka.init()
-    math.randomseed(os.time())
-    
     reset_game()
 end
 
