@@ -64,36 +64,31 @@ function lilka.init()
     reset_game()
 end
 
--- lilka.update(delta) is called every frame
 function lilka.update(delta)
-    
-    -- ### 1. Handle Input ###
-    local state = controller.getState()
-
     if game_over then
-        if state.a.justPressed then
+        -- Check controller.a directly
+        if controller.a.justPressed then
             reset_game()
         end
     else
-        if state.up.justPressed and direction.y == 0 then
+        -- Check controller.up, .down, etc. directly
+        if controller.up.justPressed and direction.y == 0 then
             direction = { x = 0, y = -1 }
-        elseif state.down.justPressed and direction.y == 0 then
+        elseif controller.down.justPressed and direction.y == 0 then
             direction = { x = 0, y = 1 }
-        elseif state.left.justPressed and direction.x == 0 then
+        elseif controller.left.justPressed and direction.x == 0 then
             direction = { x = -1, y = 0 }
-        elseif state.right.justPressed and direction.x == 0 then
+        elseif controller.right.justPressed and direction.x == 0 then
             direction = { x = 1, y = 0 }
         end
     end
     
     -- ### 2. Update Game Logic (using a fixed timer) ###
     
-    -- Add the frame time to our game timer
     timer = timer + delta
     
-    -- Only run the main game logic if the timer has exceeded our game speed
     if timer > game_speed and not game_over then
-        timer = 0 -- Reset the timer
+        timer = 0 
         
         local head = snake[1]
         
@@ -102,13 +97,11 @@ function lilka.update(delta)
             y = head.y + direction.y
         }
         
-        -- Check for Wall collision
         if new_head.x < 0 or new_head.x >= GRID_WIDTH or
            new_head.y < 0 or new_head.y >= GRID_HEIGHT then
             game_over = true
         end
         
-        -- Check for Self-collision
         for _, segment in ipairs(snake) do
             if new_head.x == segment.x and new_head.y == segment.y then
                 game_over = true
@@ -117,16 +110,13 @@ function lilka.update(delta)
         end
         
         if not game_over then
-            -- Add the new head to the front of the snake
             table.insert(snake, 1, new_head)
             
-            -- Check for food
             if new_head.x == food.x and new_head.y == food.y then
                 score = score + 1
                 spawn_food()
-                game_speed = game_speed * 0.98 -- Increase speed
+                game_speed = game_speed * 0.98
             else
-                -- Remove the tail segment to simulate movement
                 table.remove(snake)
             end
         end
@@ -134,26 +124,21 @@ function lilka.update(delta)
     
     -- ### 3. Draw Everything ###
     
-    -- Clear the screen
     display.fill_screen(BLACK)
     
-    -- Draw the food
     display.fill_rect(food.x * GRID_SIZE, food.y * GRID_SIZE, GRID_SIZE, GRID_SIZE, RED)
     
-    -- Draw the snake
     for i, segment in ipairs(snake) do
         local color = WHITE
         if i == 1 then
-            color = GREEN -- Make the head green
+            color = GREEN
         end
         display.fill_rect(segment.x * GRID_SIZE, segment.y * GRID_SIZE, GRID_SIZE, GRID_SIZE, color)
     end
     
-    -- Draw the score
     display.set_cursor(2, 2)
     display.print("Score: " .. score)
     
-    -- Draw Game Over message
     if game_over then
         display.set_cursor( (GRID_WIDTH * GRID_SIZE / 2) - 40, (GRID_HEIGHT * GRID_SIZE / 2) - 10)
         display.print("GAME OVER")
@@ -161,6 +146,5 @@ function lilka.update(delta)
         display.print("Press A to Restart")
     end
     
-    -- IMPORTANT: Push the drawing buffer to the screen
     display.queue_draw()
 end
