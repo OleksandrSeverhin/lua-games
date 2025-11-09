@@ -64,26 +64,31 @@ function lilka.init()
     reset_game()
 end
 
+-- lilka.update(delta) is called every frame
 function lilka.update(delta)
+    
+    -- ### 1. Handle Input ###
+    local state = controller.get_state() 
+
     if game_over then
-        -- Check controller.a directly
-        if controller.a.justPressed then
+        -- Check 'state.a.justPressed'
+        if state.a.justPressed then
             reset_game()
         end
     else
-        -- Check controller.up, .down, etc. directly
-        if controller.up.justPressed and direction.y == 0 then
+        -- Check 'state.up.justPressed', 'state.down.justPressed', etc.
+        if state.up.justPressed and direction.y == 0 then
             direction = { x = 0, y = -1 }
-        elseif controller.down.justPressed and direction.y == 0 then
+        elseif state.down.justPressed and direction.y == 0 then
             direction = { x = 0, y = 1 }
-        elseif controller.left.justPressed and direction.x == 0 then
+        elseif state.left.justPressed and direction.x == 0 then
             direction = { x = -1, y = 0 }
-        elseif controller.right.justPressed and direction.x == 0 then
+        elseif state.right.justPressed and direction.x == 0 then
             direction = { x = 1, y = 0 }
         end
     end
     
-    -- ### 2. Update Game Logic (using a fixed timer) ###
+    -- ### 2. Update Game Logic (This part was correct and remains unchanged) ###
     
     timer = timer + delta
     
@@ -97,11 +102,13 @@ function lilka.update(delta)
             y = head.y + direction.y
         }
         
+        -- Check for Wall collision
         if new_head.x < 0 or new_head.x >= GRID_WIDTH or
            new_head.y < 0 or new_head.y >= GRID_HEIGHT then
             game_over = true
         end
         
+        -- Check for Self-collision
         for _, segment in ipairs(snake) do
             if new_head.x == segment.x and new_head.y == segment.y then
                 game_over = true
@@ -122,7 +129,7 @@ function lilka.update(delta)
         end
     end
     
-    -- ### 3. Draw Everything ###
+    -- ### 3. Draw Everything (This part was correct and remains unchanged) ###
     
     display.fill_screen(BLACK)
     
