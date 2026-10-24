@@ -1,172 +1,250 @@
+-- Classic Snake for Lilka (KeiraOS Lua API)
+-- Controls: D-pad = steer, START = pause, A = restart (after game over), B = exit
+
 -- Configuration
-GRID_SIZE = 8       -- Size of each block in pixels
-GRID_WIDTH = 26     -- Game area width in grid units
-GRID_HEIGHT = 18    -- Game area height in grid units
+local CELL = 10          -- Size of each cell in pixels
+local HUD_HEIGHT = 20    -- Top strip reserved for the score
+local START_STEP = 0.16  -- Seconds per move at the start
+local MIN_STEP = 0.06    -- Fastest possible speed
+local SPEED_UP = 0.97    -- Step multiplier for every food eaten
+local MAX_QUEUED_TURNS = 2
 
--- Define colors
-local BLACK = display.color565(0, 0, 0)
-local WHITE = display.color565(255, 255, 255)
-local RED = display.color565(255, 0, 0)
-local GREEN = display.color565(0, 255, 0)
+-- Derived layout (computed in lilka.init, once the display size is known)
+local grid_w, grid_h
+local offset_x, offset_y
 
--- Game state variables
-local snake
+-- Colors
+local BLACK, WHITE, RED, GREEN, DARK_GREEN, GRAY
+
+-- Game state
+local snake          -- array of {x, y}; snake[1] is the head
+local direction      -- direction of the last performed move
+local turn_queue     -- buffered direction changes from the D-pad
 local food
-local direction
 local score
+local high_score = 0
+local step_time
+local accumulator
 local game_over
-local timer
-local game_speed
+local won
+local paused
 
--- Helper function to reset and start the game
-function reset_game()
+-- Direction vectors
+local UP    = { x = 0,  y = -1 }
+local DOWN  = { x = 0,  y = 1 }
+local LEFT  = { x = -1, y = 0 }
+local RIGHT = { x = 1,  y = 0 }
+
+-- Draws text centered horizontally at the given y (font is 10px wide per char)
+local function draw_centered(text, y)
+    display.set_cursor(math.floor((display.width - #text * 10) / 2), y)
+    display.print(text)
+end
+
+-- Places food on a random free cell. Returns false when the board is full.
+local function spawn_food()
+    local occupied = {}
+    for _, s in ipairs(snake) do
+        occupied[s.y * grid_w + s.x] = true
+    end
+
+    local free = {}
+    for y = 0, grid_h - 1 do
+        for x = 0, grid_w - 1 do
+            if not occupied[y * grid_w + x] then
+                free[#free + 1] = { x = x, y = y }
+            end
+        end
+    end
+
+    if #free == 0 then
+        food = nil
+        return false
+    end
+
+    -- KeiraOS math.random(min, max) excludes max; clamp in case it is inclusive
+    food = free[math.min(#free, math.random(1, #free + 1))]
+    return true
+end
+
+local function reset_game()
+    local sx = math.floor(grid_w / 2)
+    local sy = math.floor(grid_h / 2)
+
     snake = {
-        { x = 5, y = 5 },
-        { x = 4, y = 5 },
-        { x = 3, y = 5 }
+        { x = sx,     y = sy },
+        { x = sx - 1, y = sy },
+        { x = sx - 2, y = sy },
     }
-    
-    direction = { x = 1, y = 0 }
-    
+    direction = RIGHT
+    turn_queue = {}
     score = 0
+    step_time = START_STEP
+    accumulator = 0
     game_over = false
-    timer = 0
-    game_speed = 0.15
-    
+    won = false
+    paused = false
+
     spawn_food()
 end
 
--- Helper function to spawn food in a random location
-function spawn_food()
-    while true do
-        food = {
-            x = math.random(0, GRID_WIDTH - 1),
-            y = math.random(0, GRID_HEIGHT - 1)
-        }
-        
-        local on_snake = false
-        for _, segment in ipairs(snake) do
-            if food.x == segment.x and food.y == segment.y then
-                on_snake = true
-                break
-            end
-        end
-        
-        if not on_snake then
-            break
-        end
+-- Queues a turn, ignoring reversals and repeats relative to the last queued direction
+local function queue_turn(dir)
+    if #turn_queue >= MAX_QUEUED_TURNS then
+        return
+    end
+    local last = turn_queue[#turn_queue] or direction
+    if (dir.x == -last.x and dir.y == -last.y) or (dir.x == last.x and dir.y == last.y) then
+        return
+    end
+    turn_queue[#turn_queue + 1] = dir
+end
+
+local function finish_game()
+    game_over = true
+    if score > high_score then
+        high_score = score
     end
 end
 
--- lilka.init() is called once at the start
+-- Advances the snake by one cell
+local function step()
+    if #turn_queue > 0 then
+        direction = table.remove(turn_queue, 1)
+    end
+
+    local head = snake[1]
+    local nx = head.x + direction.x
+    local ny = head.y + direction.y
+
+    -- Wall collision
+    if nx < 0 or nx >= grid_w or ny < 0 or ny >= grid_h then
+        finish_game()
+        return
+    end
+
+    local eating = food ~= nil and nx == food.x and ny == food.y
+
+    -- Self collision. The tail cell is about to be vacated, so it is safe
+    -- to step onto it unless we are growing this turn.
+    local last = #snake
+    if not eating then
+        last = last - 1
+    end
+    for i = 1, last do
+        if snake[i].x == nx and snake[i].y == ny then
+            finish_game()
+            return
+        end
+    end
+
+    table.insert(snake, 1, { x = nx, y = ny })
+
+    if eating then
+        score = score + 1
+        step_time = math.max(MIN_STEP, step_time * SPEED_UP)
+        if not spawn_food() then
+            won = true
+            finish_game()
+        end
+    else
+        table.remove(snake)
+    end
+end
+
 function lilka.init()
-    -- KeiraOS seeds math.random automatically
+    BLACK = display.color565(0, 0, 0)
+    WHITE = display.color565(255, 255, 255)
+    RED = display.color565(255, 0, 0)
+    GREEN = display.color565(0, 255, 0)
+    DARK_GREEN = display.color565(0, 160, 0)
+    GRAY = display.color565(80, 80, 80)
+
+    grid_w = math.floor(display.width / CELL)
+    grid_h = math.floor((display.height - HUD_HEIGHT) / CELL)
+    offset_x = math.floor((display.width - grid_w * CELL) / 2)
+    offset_y = HUD_HEIGHT + math.floor((display.height - HUD_HEIGHT - grid_h * CELL) / 2)
+
     reset_game()
 end
 
--- lilka.update(delta) is called every frame for game logic
 function lilka.update(delta)
-    
-    -- ### 1. Handle Input ###
-    
-    local state = controller.get_state() 
+    local state = controller.get_state()
 
-    -- Added a way to exit the game
-    if state.b.justPressed then
+    if state.b.just_pressed then
         util.exit()
+        return
     end
 
     if game_over then
-        if state.a.justPressed then
+        if state.a.just_pressed then
             reset_game()
         end
-    else
-        if state.up.justPressed and direction.y == 0 then
-            direction = { x = 0, y = -1 }
-        elseif state.down.justPressed and direction.y == 0 then
-            direction = { x = 0, y = 1 }
-        elseif state.left.justPressed and direction.x == 0 then
-            direction = { x = -1, y = 0 }
-        elseif state.right.justPressed and direction.x == 0 then
-            direction = { x = 1, y = 0 }
-        end
+        return
     end
-    
-    -- ### 2. Update Game Logic ###
-    
-    timer = timer + delta
-    
-    -- Only run the main game logic if the timer has exceeded our game speed
-    if timer > game_speed and not game_over then
-        timer = 0 
-        
-        local head = snake[1]
-        
-        local new_head = {
-            x = head.x + direction.x,
-            y = head.y + direction.y
-        }
-        
-        -- Check for Wall collision
-        if new_head.x < 0 or new_head.x >= GRID_WIDTH or
-           new_head.y < 0 or new_head.y >= GRID_HEIGHT then
-            game_over = true
-        end
-        
-        -- Check for Self-collision
-        for _, segment in ipairs(snake) do
-            if new_head.x == segment.x and new_head.y == segment.y then
-                game_over = true
-                break
-            end
-        end
-        
-        if not game_over then
-            -- Add the new head to the front of the snake
-            table.insert(snake, 1, new_head)
-            
-            -- Check for food
-            if new_head.x == food.x and new_head.y == food.y then
-                score = score + 1
-                spawn_food()
-                game_speed = game_speed * 0.98 -- Increase speed
-            else
-                -- Remove the tail segment to simulate movement
-                table.remove(snake)
-            end
-        end
+
+    if state.start.just_pressed then
+        paused = not paused
+    end
+    if paused then
+        return
+    end
+
+    if state.up.just_pressed then
+        queue_turn(UP)
+    elseif state.down.just_pressed then
+        queue_turn(DOWN)
+    elseif state.left.just_pressed then
+        queue_turn(LEFT)
+    elseif state.right.just_pressed then
+        queue_turn(RIGHT)
+    end
+
+    -- Fixed time step so speed doesn't depend on the frame rate
+    accumulator = accumulator + delta
+    while accumulator >= step_time and not game_over do
+        accumulator = accumulator - step_time
+        step()
     end
 end
 
--- lilka.draw() is called after update, for all rendering
+local function draw_cell(cx, cy, color)
+    display.fill_rect(offset_x + cx * CELL, offset_y + cy * CELL, CELL - 1, CELL - 1, color)
+end
+
 function lilka.draw()
-    
-    -- Clear the screen
     display.fill_screen(BLACK)
-    
-    -- Draw the food
-    display.fill_rect(food.x * GRID_SIZE, food.y * GRID_SIZE, GRID_SIZE, GRID_SIZE, RED)
-    
-    -- Draw the snake
+
+    -- Playfield border
+    display.draw_rect(offset_x - 1, offset_y - 1, grid_w * CELL + 2, grid_h * CELL + 2, GRAY)
+
+    -- Food
+    if food then
+        draw_cell(food.x, food.y, RED)
+    end
+
+    -- Snake
     for i, segment in ipairs(snake) do
-        local color = WHITE
-        if i == 1 then
-            color = GREEN -- Make the head green
-        end
-        display.fill_rect(segment.x * GRID_SIZE, segment.y * GRID_SIZE, GRID_SIZE, GRID_SIZE, color)
+        draw_cell(segment.x, segment.y, i == 1 and GREEN or DARK_GREEN)
     end
-    
-    -- Draw the score
-    display.set_cursor(2, 2)
+
+    -- HUD
+    display.set_font("10x20")
+    display.set_text_size(1)
+    display.set_text_color(WHITE)
+    display.set_cursor(4, 16)
     display.print("Score: " .. score)
-    
-    -- Draw Game Over message
-    if game_over then
-        display.set_cursor( (GRID_WIDTH * GRID_SIZE / 2) - 40, (GRID_HEIGHT * GRID_SIZE / 2) - 10)
-        display.print("GAME OVER")
-        display.set_cursor( (GRID_WIDTH * GRID_SIZE / 2) - 50, (GRID_HEIGHT * GRID_SIZE / 2) + 10)
-        display.print("Press A to Restart")
+    local best = "Best: " .. high_score
+    display.set_cursor(display.width - #best * 10 - 4, 16)
+    display.print(best)
+
+    if paused then
+        draw_centered("PAUSED", math.floor(display.height / 2))
     end
-    
-    -- No display.queue_draw() needed; the OS handles it
+
+    if game_over then
+        local mid = math.floor(display.height / 2)
+        draw_centered(won and "YOU WIN!" or "GAME OVER", mid - 10)
+        draw_centered("A: restart  B: exit", mid + 20)
+    end
 end
